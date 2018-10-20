@@ -9,11 +9,12 @@ from copy import deepcopy
 
 class ALPaCA:
     def __init__(self,config):
+        # print('CONFIG', config)
         self.config = deepcopy(config)
         self.lr=config['lr']
         self.x_dim = config['x_dim']
         self.y_dim = config['y_dim']
-        self.lmda = config['lambda']
+        # self.lmda = config['lambda']
         self.sigma_scalar = self.config['sigma_eps']
         
         self.updates_so_far = 0
@@ -23,7 +24,7 @@ class ALPaCA:
             graph = tf.get_default_graph()
             
         with graph.as_default():
-            num_updates = self.config['num_updates']
+            # num_updates = self.config['num_updates']
             last_layer = self.config['nn_layers'][-1]
 
 
@@ -151,7 +152,6 @@ class ALPaCA:
         return sess.run(self.phi, feed_dict)
         
     def train(self,sess,y,x,num_train_updates):
-        
         num_samples = self.config['num_class_samples']
         horizon = self.config['data_horizon']
         test_horizon = self.config['test_horizon']
