@@ -4,6 +4,7 @@ import numpy as np
 import yaml
 import time
 from copy import deepcopy
+import matplotlib.pyplot as plt
 
 
 
@@ -151,22 +152,30 @@ class ALPaCA:
         }
         return sess.run(self.phi, feed_dict)
         
-    def train(self,sess,y,x,num_train_updates):
+    def train(self,sess,y,x,num_train_updates, plot_loss=False):
         num_samples = self.config['num_class_samples']
         horizon = self.config['data_horizon']
         test_horizon = self.config['test_horizon']
+        loss_array = np.zeros(num_train_updates)
 
         #minimize loss
         for i in range(num_train_updates):
             feed_dict = self.gen_variable_horizon_data(x,y,num_samples,horizon,test_horizon)
             
             summary,loss, _ = sess.run([self.merged,self.total_loss,self.train_op],feed_dict)
+            loss_array[i] = loss
             
             if i % 50 == 0:
                 print('loss:',loss)
             
             self.train_writer.add_summary(summary, self.updates_so_far)
             self.updates_so_far += 1
+
+        if plot_loss:
+            # plot loss_array
+            plt.plot(loss_array)
+            plt.ylabel('Loss')
+            plt.show()
 
     def gen_variable_horizon_data(self,x,y,num_samples,horizon,test_horizon):
         num_updates = np.random.randint(horizon+1, size=num_samples)

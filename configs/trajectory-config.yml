@@ -17,5 +17,6 @@ step_max: 2.5
 num_steps: 3
 
 num_input_points: 10
+num_hand_points: 21
 input_dim: 3
 shuffle: False
