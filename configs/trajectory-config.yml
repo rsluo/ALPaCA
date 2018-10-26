@@ -1,7 +1,7 @@
 test_horizon: 50
-lr: 0.001
-x_dim: 1
-y_dim: 1
+lr: 0.0001
+x_dim: 567
+y_dim: 63
 sigma_eps: 0.05
 
 data_horizon: 50
@@ -13,7 +13,6 @@ activation: 'tanh'
 # step params:
 step_min: -2.5
 step_max: 2.5
-
 num_steps: 3
 
 num_input_points: 10

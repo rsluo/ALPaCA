@@ -1,5 +1,7 @@
 *.pyc
 ._*.py
+._*.yml
+.ipynb_checkpoints/
 summaries/
 figures/
 src/

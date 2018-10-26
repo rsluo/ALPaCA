@@ -13,9 +13,13 @@ class ALPaCA:
         # print('CONFIG', config)
         self.config = deepcopy(config)
         self.lr=config['lr']
+        # self.num_input_points = config['num_input_points']
+        # self.num_hand_points = config['num_hand_points']
+        # self.input_dim = config['input_dim']
+        # self.x_dim = num_input_points * num_hand_points * input_dim
+        # self.y_dim = 1 * num_hand_points * input_dim
         self.x_dim = config['x_dim']
         self.y_dim = config['y_dim']
-        # self.lmda = config['lambda']
         self.sigma_scalar = self.config['sigma_eps']
         
         self.updates_so_far = 0

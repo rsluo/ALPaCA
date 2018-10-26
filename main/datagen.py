@@ -222,3 +222,103 @@ def get_v_dir_from_filename(filename):
     v = float( tokens[4].split("=")[1] )
     dir = float( tokens[-1].split("=")[1][:-3])
     return v,dir
+
+
+class TrajectoriesDataset():
+    def __init__(self, root_dir, num_input_points, num_hand_points=21, input_dim=3, shuffle=False):
+        self.root_dir = root_dir
+        self.num_input_points = num_input_points
+        self.num_hand_points = num_hand_points
+        self.input_dim = input_dim
+        self.shuffle = shuffle
+        # Get all filepaths, excluding empty files
+        self.all_filepaths = [a for (a, b, c) in os.walk(self.root_dir) if len(b) == 0 and os.stat(os.path.join(a,c[0])).st_size > 10]
+        
+    def __len__(self):
+        return len(self.all_filepaths)
+
+    def __getitem__(self, filepath_idx):
+        filepath = os.path.join(self.all_filepaths[filepath_idx], "skeleton.txt")
+
+        with open(filepath) as file:
+            file_contents = file.readlines()
+            traj_length = len(file_contents)
+            traj_array = np.zeros((traj_length - self.num_input_points - 1, (self.num_input_points-1)*self.input_dim*self.num_hand_points))
+            target_array = np.zeros((traj_length - self.num_input_points - 1, self.input_dim*self.num_hand_points))
+            init_array = np.zeros((traj_length - self.num_input_points - 1, self.input_dim*self.num_hand_points))
+            
+            if traj_length >= self.num_input_points + 1:
+                for i in range(traj_length - self.num_input_points - 1):
+                    for j in range(1, self.num_input_points):
+                        prev_file_line = file_contents[i + j - 1].split()
+                        file_line = file_contents[i + j].split()
+                        for k in range(len(file_line) - 1):
+                            traj_array[i, (j-1)*self.input_dim*self.num_hand_points + k] = float(file_line[k+1]) - float(prev_file_line[k+1])
+
+                    temp_target_array = np.asarray(file_contents[i+j+1].split()).astype(np.float)
+                    temp_target_array_prev = np.asarray(file_contents[i+j].split()).astype(np.float)
+                    target_array[i, :] = temp_target_array[1:] - temp_target_array_prev[1:]
+                    temp_init_array = np.asarray(file_contents[i].split()).astype(np.float)
+                    init_array[i, :] = temp_init_array[1:]
+
+        # print('traj_array', traj_array)
+        return target_array, traj_array, init_array
+
+    def sample_trajectories(self, num_samples):
+        max_traj_length = 1151
+        sample_ids = np.random.choice(self.__len__(), num_samples)
+        traj_matrix = np.zeros((num_samples, max_traj_length - self.num_input_points - 1, (self.num_input_points-1)*self.input_dim*self.num_hand_points))
+        target_matrix = np.zeros((num_samples, max_traj_length - self.num_input_points - 1, self.input_dim*self.num_hand_points))
+        init_matrix = np.zeros((num_samples, max_traj_length - self.num_input_points - 1, self.input_dim*self.num_hand_points))
+        
+        for i in range(num_samples):
+            idx = sample_ids[i]
+            target_array, traj_array, init_array = self.__getitem__(idx)
+            target_array_length = target_array.shape[0]
+            traj_array_length = traj_array.shape[0]
+            init_array_length = init_array.shape[0]
+            target_matrix[i, :target_array_length, :] = target_array
+            traj_matrix[i, :traj_array_length, :] = traj_array
+            init_matrix[i, :init_array_length, :] = init_array
+
+        return target_matrix, traj_matrix, init_matrix
+
+
+    # def __getitem__(self, filepath_idx):
+    #     filepath = os.path.join(self.all_filepaths[filepath_idx], "skeleton.txt")
+    #     # full_array = np.loadtxt(filepath)
+    #     # full_array = full_array[:,1:]
+
+    #     with open(filepath) as file:
+    #         file_contents = file.readlines()
+    #         traj_length = len(file_contents)
+    #         traj_array = np.zeros((traj_length - self.num_input_points - 1, self.num_input_points*self.input_dim*self.num_hand_points))
+    #         target_array = np.zeros((traj_length - self.num_input_points - 1, self.input_dim*self.num_hand_points))
+
+    #         if traj_length >= self.num_input_points + 1:
+    #             for i in range(traj_length - self.num_input_points - 1):
+    #                 for j in range(self.num_input_points):
+    #                     file_line = file_contents[i + j].split()
+    #                     for k in range(len(file_line) - 1):
+    #                         traj_array[i, j*self.num_input_points + k] = file_line[k+1]
+
+    #                 temp_target_array = np.asarray(file_contents[i+j+1].split()).astype(np.float)
+    #                 target_array[i, :] = temp_target_array[1:]
+
+    #     return target_array, traj_array
+    
+    # def sample_trajectories(self, num_samples):
+    #     max_traj_length = 1151
+    #     sample_ids = np.random.choice(self.__len__(), num_samples)
+    #     traj_matrix = np.zeros((num_samples, max_traj_length - self.num_input_points - 1, self.num_input_points*self.input_dim*self.num_hand_points))
+    #     target_matrix = np.zeros((num_samples, max_traj_length - self.num_input_points - 1, self.input_dim*self.num_hand_points))
+        
+    #     for i in range(num_samples):
+    #         idx = sample_ids[i]
+    #         target_array, traj_array = self.__getitem__(idx)
+    #         target_array_length = target_array.shape[0]
+    #         traj_array_length = traj_array.shape[0]
+    #         traj_matrix[i, :traj_array_length, :] = traj_array
+    #         target_matrix[i, :target_array_length, :] = target_array
+
+    #     return target_matrix, traj_matrix
