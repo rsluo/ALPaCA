@@ -7,22 +7,16 @@ from copy import deepcopy
 import matplotlib.pyplot as plt
 
 
-
 class ALPaCA:
     def __init__(self,config):
         # print('CONFIG', config)
         self.config = deepcopy(config)
         self.lr=config['lr']
-        # self.num_input_points = config['num_input_points']
-        # self.num_hand_points = config['num_hand_points']
-        # self.input_dim = config['input_dim']
-        # self.x_dim = num_input_points * num_hand_points * input_dim
-        # self.y_dim = 1 * num_hand_points * input_dim
         self.x_dim = config['x_dim']
         self.y_dim = config['y_dim']
         self.sigma_scalar = self.config['sigma_eps']
-        
         self.updates_so_far = 0
+        self.model_name = 'nn_layers='+str(self.config['nn_layers'])+'_lr='+str(self.lr)+'_sigma_eps='+str(self.sigma_scalar)
         
     def construct_model(self,sess,graph=None):
         if not graph:
@@ -87,12 +81,15 @@ class ALPaCA:
                 self.train_op = self.optimizer.minimize(self.total_loss,global_step=global_step)
 
                 #summaries
+                config_tensor = [tf.convert_to_tensor([k, str(v)]) for k, v in self.config.items()]
                 tf.summary.scalar('total_loss', self.total_loss)
                 tf.summary.scalar('RMSE', self.rmse)
                 tf.summary.scalar('MPV', self.mpv)
                 tf.summary.tensor_summary('K', self.K)
                 tf.summary.tensor_summary('Lambda', self.L)
-                self.train_writer = tf.summary.FileWriter('summaries/'+str(time.time()), sess.graph, flush_secs=10)
+                tf.summary.text('config', tf.stack(config_tensor))
+                self.train_writer = tf.summary.FileWriter('summaries/'+self.model_name, sess.graph, flush_secs=10)
+                # self.train_writer = tf.summary.FileWriter('summaries/'+str(time.time()), sess.graph, flush_secs=10)
                 self.merged = tf.summary.merge_all()
 
             sess.run(tf.global_variables_initializer())
@@ -156,11 +153,12 @@ class ALPaCA:
         }
         return sess.run(self.phi, feed_dict)
         
-    def train(self,sess,y,x,num_train_updates, plot_loss=False):
+    def train(self, sess, y, x, num_train_updates, plot_loss=False, save_model=True):
         num_samples = self.config['num_class_samples']
         horizon = self.config['data_horizon']
         test_horizon = self.config['test_horizon']
         loss_array = np.zeros(num_train_updates)
+        saver = tf.train.Saver()
 
         #minimize loss
         for i in range(num_train_updates):
@@ -171,6 +169,10 @@ class ALPaCA:
             
             if i % 50 == 0:
                 print('loss:',loss)
+
+            if i % 1000 == 0:
+                # Append the index number to the checkpoint name:
+                saver.save(sess, 'checkpoints/'+self.model_name, global_step=i)
             
             self.train_writer.add_summary(summary, self.updates_so_far)
             self.updates_so_far += 1
@@ -220,7 +222,7 @@ class ALPaCA:
 
         inp = x
         with tf.variable_scope(name,reuse=tf.AUTO_REUSE):
-#             inp = tf.stack([x],axis=1)
+            # inp = tf.stack([x],axis=1)
             for units in layer_sizes:
                 inp = tf.layers.dense(inputs=inp, units=units,activation=activation)
             

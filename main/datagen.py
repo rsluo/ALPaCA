@@ -232,7 +232,7 @@ class TrajectoriesDataset():
         self.input_dim = input_dim
         self.shuffle = shuffle
         # Get all filepaths, excluding empty files
-        self.all_filepaths = [a for (a, b, c) in os.walk(self.root_dir) if len(b) == 0 and os.stat(os.path.join(a,c[0])).st_size > 10]
+        self.all_filepaths = [a for (a, b, c) in os.walk(self.root_dir) if len(b) == 0 and os.stat(os.path.join(a,c[0])).st_size > 10000]
         
     def __len__(self):
         return len(self.all_filepaths)
@@ -246,26 +246,26 @@ class TrajectoriesDataset():
             traj_array = np.zeros((traj_length - self.num_input_points - 1, (self.num_input_points-1)*self.input_dim*self.num_hand_points))
             target_array = np.zeros((traj_length - self.num_input_points - 1, self.input_dim*self.num_hand_points))
             init_array = np.zeros((traj_length - self.num_input_points - 1, self.input_dim*self.num_hand_points))
+
+            assert (traj_length >= self.num_input_points + 1), "Trajectory is too short!"
             
-            if traj_length >= self.num_input_points + 1:
-                for i in range(traj_length - self.num_input_points - 1):
-                    for j in range(1, self.num_input_points):
-                        prev_file_line = file_contents[i + j - 1].split()
-                        file_line = file_contents[i + j].split()
-                        for k in range(len(file_line) - 1):
-                            traj_array[i, (j-1)*self.input_dim*self.num_hand_points + k] = float(file_line[k+1]) - float(prev_file_line[k+1])
+            for i in range(traj_length - self.num_input_points - 1):
+                for j in range(1, self.num_input_points):
+                    prev_file_line = file_contents[i + j - 1].split()
+                    file_line = file_contents[i + j].split()
+                    for k in range(len(file_line) - 1):
+                        traj_array[i, (j-1)*self.input_dim*self.num_hand_points + k] = float(file_line[k+1]) - float(prev_file_line[k+1])
 
-                    temp_target_array = np.asarray(file_contents[i+j+1].split()).astype(np.float)
-                    temp_target_array_prev = np.asarray(file_contents[i+j].split()).astype(np.float)
-                    target_array[i, :] = temp_target_array[1:] - temp_target_array_prev[1:]
-                    temp_init_array = np.asarray(file_contents[i].split()).astype(np.float)
-                    init_array[i, :] = temp_init_array[1:]
+                temp_target_array = np.asarray(file_contents[i+j+1].split()).astype(np.float)
+                temp_target_array_prev = np.asarray(file_contents[i+j].split()).astype(np.float)
+                target_array[i, :] = temp_target_array[1:] - temp_target_array_prev[1:]
+                temp_init_array = np.asarray(file_contents[i].split()).astype(np.float)
+                init_array[i, :] = temp_init_array[1:]
 
-        # print('traj_array', traj_array)
         return target_array, traj_array, init_array
 
     def sample_trajectories(self, num_samples):
-        max_traj_length = 1151
+        max_traj_length = 50    # 1151
         sample_ids = np.random.choice(self.__len__(), num_samples)
         traj_matrix = np.zeros((num_samples, max_traj_length - self.num_input_points - 1, (self.num_input_points-1)*self.input_dim*self.num_hand_points))
         target_matrix = np.zeros((num_samples, max_traj_length - self.num_input_points - 1, self.input_dim*self.num_hand_points))
