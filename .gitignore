@@ -3,5 +3,6 @@
 ._*.yml
 .ipynb_checkpoints/
 summaries/
+checkpoints/
 figures/
 src/

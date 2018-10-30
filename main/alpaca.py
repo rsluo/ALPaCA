@@ -16,7 +16,7 @@ class ALPaCA:
         self.y_dim = config['y_dim']
         self.sigma_scalar = self.config['sigma_eps']
         self.updates_so_far = 0
-        self.model_name = 'nn_layers='+str(self.config['nn_layers'])+'_lr='+str(self.lr)+'_sigma_eps='+str(self.sigma_scalar)
+        self.model_name = 'nn_layers='+str(self.config['nn_layers'])+'_lr='+str(self.lr)+'_sigma_eps='+str(self.sigma_scalar)+'_num_class_samples='+str(self.config['num_class_samples'])
         
     def construct_model(self,sess,graph=None):
         if not graph:
@@ -88,7 +88,7 @@ class ALPaCA:
                 tf.summary.tensor_summary('K', self.K)
                 tf.summary.tensor_summary('Lambda', self.L)
                 tf.summary.text('config', tf.stack(config_tensor))
-                self.train_writer = tf.summary.FileWriter('summaries/'+self.model_name, sess.graph, flush_secs=10)
+                self.train_writer = tf.summary.FileWriter('summaries/'+str(time.time())+'_'+self.model_name, sess.graph, flush_secs=10)
                 # self.train_writer = tf.summary.FileWriter('summaries/'+str(time.time()), sess.graph, flush_secs=10)
                 self.merged = tf.summary.merge_all()
 
