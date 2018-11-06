@@ -16,7 +16,7 @@ class ALPaCA:
         self.y_dim = config['y_dim']
         self.sigma_scalar = self.config['sigma_eps']
         self.updates_so_far = 0
-        self.model_name = 'nn_layers='+str(self.config['nn_layers'])+'_lr='+str(self.lr)+'_sigma_eps='+str(self.sigma_scalar)+'_num_class_samples='+str(self.config['num_class_samples'])
+        self.model_name = 'action='+self.config['action']+'_nn_layers='+str(self.config['nn_layers'])+'_lr='+str(self.lr)+'_sigma_eps='+str(self.sigma_scalar)+'_num_class_samples='+str(self.config['num_class_samples'])
         
     def construct_model(self,sess,graph=None):
         if not graph:
@@ -146,6 +146,36 @@ class ALPaCA:
         y_pred, Sig_pred = sess.run([self.y_pred, self.Sig_pred], feed_dict)
         return y_pred, Sig_pred
 
+    def test_rmse(self, sess, x_test_full, y_test_full):
+        num_rows, row_length, _ = x_test_full.shape
+        rmse_array = np.zeros((num_rows, row_length - 1))
+        for row in range(num_rows):
+            x_test = x_test_full[row, :, :]
+            y_test = y_test_full[row, :, :]
+
+            for i in range(1, row_length):
+                ux = x_test[:i, :]
+                ux = np.expand_dims(ux, axis=0)
+                uy = y_test[:i, :]
+                uy = np.expand_dims(uy, axis=0)
+                x = x_test[i, :]
+                x = np.expand_dims(np.expand_dims(x, axis=0), axis=0)
+                y = y_test[i, :]
+                y = np.expand_dims(np.expand_dims(y, axis=0), axis=0)
+
+                y_pred, Sig_pred = self.test(sess, ux, uy, x)
+
+                feed_dict = {
+                    self.y_pred: y_pred, 
+                    self.y: y
+                }
+                rmse = sess.run(self.rmse, feed_dict)
+                # print('rmse', rmse)
+                rmse_array[row, i-1] = rmse
+
+        avg_rmse = np.mean(rmse_array)
+        return avg_rmse
+
     # convenience function to use just the encoder on numpy input
     def encode(self, sess, x):
         feed_dict = {
@@ -172,7 +202,7 @@ class ALPaCA:
 
             if i % 1000 == 0:
                 # Append the index number to the checkpoint name:
-                saver.save(sess, 'checkpoints/'+self.model_name, global_step=i)
+                saver.save(sess, 'checkpoints/'+str(time.time())+self.model_name, global_step=i)
             
             self.train_writer.add_summary(summary, self.updates_so_far)
             self.updates_so_far += 1
@@ -201,6 +231,12 @@ class ALPaCA:
         y = y[:,horizon:,:]
         x = x[:,horizon:,:]
         
+        # print('num_updates', num_updates)
+        # print('ux shape', ux.shape)
+        # print('uy shape', uy.shape)
+        # print('x shape', x.shape)
+        # print('y shape', y.shape)
+
         feed_dict = {
                 self.update_y: uy,
                 self.update_x: ux,

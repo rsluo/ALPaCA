@@ -225,22 +225,30 @@ def get_v_dir_from_filename(filename):
 
 
 class TrajectoriesDataset():
-    def __init__(self, root_dir, num_input_points, num_hand_points=21, input_dim=3, row_length=30, shuffle=False):
+    def __init__(self, root_dir, action_label, num_input_points, num_hand_points=21, input_dim=3, row_length=30, shuffle=False):
         self.root_dir = root_dir
+        self.action_label = action_label
         self.num_input_points = num_input_points
         self.num_hand_points = num_hand_points
         self.input_dim = input_dim
         self.row_length = row_length
         self.shuffle = shuffle
-        # Get all filepaths, excluding empty files
-        self.all_filepaths = [a for (a, b, c) in os.walk(self.root_dir) if len(b) == 0 and os.stat(os.path.join(a,c[0])).st_size > 2000]
+        # for a, b, c in os.walk(self.root_dir):
+        #     print('a', a)
+        #     print('b', b)
+        #     print('c', c)
+        # Get all filepaths, excluding empty or small files
+        if self.action_label == 'train_set':
+            self.all_filepaths = [a for (a, b, c) in os.walk(self.root_dir) if (len(b) == 0) and (os.stat(os.path.join(a,c[0])).st_size > 2000)]
+        else:
+            self.all_filepaths = [a for (a, b, c) in os.walk(self.root_dir) if (len(b) == 0) and (a.split('/')[-2] == self.action_label) and (os.stat(os.path.join(a,c[0])).st_size > 2000)]
         
     def __len__(self):
         return len(self.all_filepaths)
 
     def __getitem__(self, filepath_idx):
         filepath = os.path.join(self.all_filepaths[filepath_idx], "skeleton.txt")
-        print('filepath', filepath)
+        # print('filepath', filepath)
 
         with open(filepath) as file:
             file_contents = file.readlines()
@@ -267,9 +275,9 @@ class TrajectoriesDataset():
                 temp_init_array = np.asarray(file_contents[i].split()).astype(np.float)
                 init_array[current_row, i%self.row_length, :] = temp_init_array[1:]
 
-            print('target_array size', target_array.shape)
-            print('traj_array size', traj_array.shape)
-            print('init_array size', init_array.shape)
+            # print('target_array size', target_array.shape)
+            # print('traj_array size', traj_array.shape)
+            # print('init_array size', init_array.shape)
 
         return target_array, traj_array, init_array
 

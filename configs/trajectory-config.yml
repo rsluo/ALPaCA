@@ -1,7 +1,7 @@
-data_horizon: 20
+data_horizon: 10
 test_horizon: 10
-row_length: 30
-num_class_samples: 100    # Basically the batch size
+row_length: 20
+num_class_samples: 50    # Basically the batch size
 x_dim: 567  # In this case x_dim = (num_input_points - 1) * num_hand_points * input_dim
 y_dim: 63   # In this case y_dim = 1 * num_hand_points * input_dim
 sigma_eps: 0.005
@@ -14,3 +14,4 @@ num_input_points: 10
 num_hand_points: 21
 input_dim: 3
 shuffle: False
+action: 'open_wallet'
