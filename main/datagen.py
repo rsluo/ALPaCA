@@ -239,9 +239,9 @@ class TrajectoriesDataset():
         #     print('c', c)
         # Get all filepaths, excluding empty or small files
         if self.action_label == 'train_set':
-            self.all_filepaths = [a for (a, b, c) in os.walk(self.root_dir) if (len(b) == 0) and (os.stat(os.path.join(a,c[0])).st_size > 2000)]
+            self.all_filepaths = [a for (a, b, c) in os.walk(self.root_dir) if (len(b) == 0) and (os.stat(os.path.join(a,c[0])).st_size > 6000)]
         else:
-            self.all_filepaths = [a for (a, b, c) in os.walk(self.root_dir) if (len(b) == 0) and (a.split('/')[-2] == self.action_label) and (os.stat(os.path.join(a,c[0])).st_size > 2000)]
+            self.all_filepaths = [a for (a, b, c) in os.walk(self.root_dir) if (len(b) == 0) and (a.split('/')[-2] == self.action_label) and (os.stat(os.path.join(a,c[0])).st_size > 6000)]
         
     def __len__(self):
         return len(self.all_filepaths)

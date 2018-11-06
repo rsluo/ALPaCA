@@ -183,22 +183,35 @@ class ALPaCA:
         }
         return sess.run(self.phi, feed_dict)
         
-    def train(self, sess, y, x, num_train_updates, plot_loss=False, save_model=True):
+    def train(self, sess, y, x, y_val, x_val, num_train_updates, plot_loss=False, save_model=True):
+        eval_frequency = self.config['eval_frequency']
         num_samples = self.config['num_class_samples']
         horizon = self.config['data_horizon']
         test_horizon = self.config['test_horizon']
         loss_array = np.zeros(num_train_updates)
+        val_loss_array = np.zeros(num_train_updates//eval_frequency)
         saver = tf.train.Saver()
 
         #minimize loss
         for i in range(num_train_updates):
-            feed_dict = self.gen_variable_horizon_data(x,y,num_samples,horizon,test_horizon)
+            feed_dict = self.gen_variable_horizon_data(x, y, num_samples, horizon, test_horizon)
             
             summary,loss, _ = sess.run([self.merged,self.total_loss,self.train_op],feed_dict)
             loss_array[i] = loss
             
             if i % 50 == 0:
                 print('loss:',loss)
+
+            if i % eval_frequency == 0:
+                # Check val loss
+                feed_dict_val = self.gen_variable_horizon_data(x_val, y_val, num_samples, horizon, test_horizon)
+                val_summary, val_loss, _ = sess.run([self.merged,self.total_loss,self.train_op],feed_dict_val)
+                val_loss_array[i//eval_frequency] = val_loss
+                print('val loss:', val_loss)
+                # if val_loss > np.mean(loss_array[i-10:i]):
+                #     print('HELLO loss', np.mean(loss_array[i-10:i]))
+                #     print('HELLO val_loss', val_loss)
+                #     break
 
             if i % 1000 == 0:
                 # Append the index number to the checkpoint name:
@@ -209,7 +222,7 @@ class ALPaCA:
 
         if plot_loss:
             # plot loss_array
-            plt.plot(loss_array)
+            plt.plot(np.arange(num_train_updates), loss_array, np.arange(0, num_train_updates, eval_frequency), val_loss_array)
             plt.ylabel('Loss')
             plt.show()
 
