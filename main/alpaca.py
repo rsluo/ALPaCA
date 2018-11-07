@@ -16,7 +16,9 @@ class ALPaCA:
         self.y_dim = config['y_dim']
         self.sigma_scalar = self.config['sigma_eps']
         self.updates_so_far = 0
-        self.model_name = 'action='+self.config['action']+'_nn_layers='+str(self.config['nn_layers'])+'_lr='+str(self.lr)+'_sigma_eps='+str(self.sigma_scalar)+'_num_class_samples='+str(self.config['num_class_samples'])
+        arch_string = [str(config_layer) for config_layer in self.config['nn_layers']]
+        arch_string = '_'.join(arch_string)
+        self.model_name = str(time.time())+'_'+'action='+self.config['action']+'_nn_layers='+arch_string+'_lr='+str(self.lr)+'_sigma_eps='+str(self.sigma_scalar)+'_num_class_samples='+str(self.config['num_class_samples'])
         
     def construct_model(self,sess,graph=None):
         if not graph:
@@ -88,7 +90,7 @@ class ALPaCA:
                 tf.summary.tensor_summary('K', self.K)
                 tf.summary.tensor_summary('Lambda', self.L)
                 tf.summary.text('config', tf.stack(config_tensor))
-                self.train_writer = tf.summary.FileWriter('summaries/'+str(time.time())+'_'+self.model_name, sess.graph, flush_secs=10)
+                self.train_writer = tf.summary.FileWriter('summaries/'+self.model_name, sess.graph, flush_secs=10)
                 # self.train_writer = tf.summary.FileWriter('summaries/'+str(time.time()), sess.graph, flush_secs=10)
                 self.merged = tf.summary.merge_all()
 
@@ -215,11 +217,12 @@ class ALPaCA:
 
             if i % 1000 == 0:
                 # Append the index number to the checkpoint name:
-                saver.save(sess, 'checkpoints/'+str(time.time())+self.model_name, global_step=i)
+                saver.save(sess, 'checkpoints/'+self.model_name, global_step=i)
             
             self.train_writer.add_summary(summary, self.updates_so_far)
             self.updates_so_far += 1
 
+        saver.save(sess, 'checkpoints/'+self.model_name, global_step=i)
         if plot_loss:
             # plot loss_array
             plt.plot(np.arange(num_train_updates), loss_array, np.arange(0, num_train_updates, eval_frequency), val_loss_array)
