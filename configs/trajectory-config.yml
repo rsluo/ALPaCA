@@ -1,12 +1,15 @@
 data_horizon: 10
 test_horizon: 10
 row_length: 20
-num_class_samples: 50    # Basically the batch size
-x_dim: 567  # In this case x_dim = (num_input_points - 1) * num_hand_points * input_dim
-y_dim: 63   # In this case y_dim = 1 * num_hand_points * input_dim
+num_class_samples: 50    # Number of trajectories that are sampled
+x_dim_time: 1     # For the time formulation.
+y_dim_time: 63    # For the time formulation.
+x_dim_space: 567  # For the space formulation. In this case x_dim = (num_input_points - 1) * num_hand_points * input_dim
+y_dim_space: 63   # For the space formulation. In this case y_dim = 1 * num_hand_points * input_dim
+x_dim: 1
+y_dim: 1
 sigma_eps: 0.005
 
-eval_frequency: 10
 lr: 0.0001
 nn_layers: [256,256,256,256]
 activation: 'tanh'
@@ -16,3 +19,4 @@ num_hand_points: 21
 input_dim: 3
 shuffle: False
 action: 'open_wallet'
+formulation: 'space'

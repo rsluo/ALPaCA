@@ -5,20 +5,29 @@ import yaml
 import time
 from copy import deepcopy
 import matplotlib.pyplot as plt
-
+from tensorflow.contrib import rnn
+from tensorflow.python import debug as tf_debug
 
 class ALPaCA:
     def __init__(self,config):
         # print('CONFIG', config)
         self.config = deepcopy(config)
         self.lr=config['lr']
-        self.x_dim = config['x_dim']
-        self.y_dim = config['y_dim']
+        self.formulation = config['formulation']
+        if self.formulation == 'time':
+            self.x_dim = config['x_dim_time']
+            self.y_dim = config['y_dim_time']
+        elif self.formulation == 'space':
+            self.x_dim = config['x_dim_space']
+            self.y_dim = config['y_dim_space']
+        else:
+            self.x_dim = config['x_dim']
+            self.y_dim = config['y_dim']
         self.sigma_scalar = self.config['sigma_eps']
         self.updates_so_far = 0
         arch_string = [str(config_layer) for config_layer in self.config['nn_layers']]
         arch_string = '_'.join(arch_string)
-        self.model_name = str(time.time())+'_'+'action='+self.config['action']+'_nn_layers='+arch_string+'_lr='+str(self.lr)+'_sigma_eps='+str(self.sigma_scalar)+'_num_class_samples='+str(self.config['num_class_samples'])
+        self.model_name = self.formulation+'_'+str(time.time())+'_'+'action='+self.config['action']+'_nn_layers='+arch_string+'_lr='+str(self.lr)+'_sigma_eps='+str(self.sigma_scalar)+'_num_class_samples='+str(self.config['num_class_samples'])
         
     def construct_model(self,sess,graph=None):
         if not graph:
@@ -50,14 +59,14 @@ class ALPaCA:
             self.x = tf.placeholder(tf.float32, shape=[None,None,self.x_dim])
             self.y = tf.placeholder(tf.float32, shape=[None,None,self.y_dim])
 
-
             with tf.variable_scope('model',reuse=None) as training_scope:
                 # just for debug / peeking under the hood
-                self.phi = tf.map_fn( lambda x: self.basis(x),
+                self.phi = tf.map_fn( lambda x: self.basis_lstm(x),
                                  elems=self.x,
                                  dtype=tf.float32)
 
                 # the actual model 
+                # tf.Assert(self.x.shape[1] == 1, [self.x])
                 pred_fn = lambda inp: self.pred_f(*inp)
                 self.y_pred, self.spread_fac, self.Sig_pred = tf.map_fn( pred_fn,
                                                         elems=(self.update_x, self.update_y, self.num_updates, self.x),
@@ -89,16 +98,16 @@ class ALPaCA:
                 tf.summary.scalar('MPV', self.mpv)
                 tf.summary.tensor_summary('K', self.K)
                 tf.summary.tensor_summary('Lambda', self.L)
-                tf.summary.text('config', tf.stack(config_tensor))
-                self.train_writer = tf.summary.FileWriter('summaries/'+self.model_name, sess.graph, flush_secs=10)
-                # self.train_writer = tf.summary.FileWriter('summaries/'+str(time.time()), sess.graph, flush_secs=10)
+                # tf.summary.text('config', tf.stack(config_tensor))
+                self.train_writer = tf.summary.FileWriter('summaries/train_'+self.model_name, sess.graph, flush_secs=10)
+                self.val_writer = tf.summary.FileWriter('summaries/val_'+self.model_name, sess.graph, flush_secs=10)
                 self.merged = tf.summary.merge_all()
 
             sess.run(tf.global_variables_initializer())
     
     
     def model(self,K,L_inv,x):
-        Phi = self.basis(x)
+        Phi = self.basis_lstm(x)
         mean = batch_matmul(tf.transpose(K),Phi)
         spread_fac = 1 + batch_quadform(L_inv, Phi)
         Sig = tf.expand_dims(spread_fac, axis=-1)*tf.expand_dims(self.SigEps, axis=0)
@@ -106,13 +115,19 @@ class ALPaCA:
     
     # uses online training examples ux, uy to update posterior and output posterior over y | x, ux, uy
     def pred_f(self, ux,uy,Nu,x):
+        # assert(x.shape[0] == 1), "shape is wrong!"
+        print('shape of ux', ux.shape)
+        print('made it to pred_f')
         ux = ux[:Nu,:]
         uy = uy[:Nu,:]
-        uPhi = self.basis(ux)
+
+        print('ux dim pred_f', ux.shape)
+        uPhi = self.basis_lstm(ux)
         Kn,Ln_inv = self.batch_update(self.K, self.L, uPhi, uy)
         return self.model(Kn,Ln_inv,x)
     
     def loss_f(self,y_pred,spread_fac,Sig_pred,y_test):
+        print('made it to loss_f')
         #logdet = tf.linalg.logdet(Sig_pred) # (N_test, 1)
         logdet = self.y_dim*tf.log(spread_fac) + tf.linalg.logdet(self.SigEps)
         Sig_pred_inv = tf.linalg.inv(Sig_pred)
@@ -186,46 +201,53 @@ class ALPaCA:
         return sess.run(self.phi, feed_dict)
         
     def train(self, sess, y, x, y_val, x_val, num_train_updates, plot_loss=False, save_model=True):
-        eval_frequency = self.config['eval_frequency']
         num_samples = self.config['num_class_samples']
         horizon = self.config['data_horizon']
         test_horizon = self.config['test_horizon']
         loss_array = np.zeros(num_train_updates)
-        val_loss_array = np.zeros(num_train_updates//eval_frequency)
+        val_loss_array = np.zeros(num_train_updates)
         saver = tf.train.Saver()
 
         #minimize loss
         for i in range(num_train_updates):
-            feed_dict = self.gen_variable_horizon_data(x, y, num_samples, horizon, test_horizon)
-            
-            summary,loss, _ = sess.run([self.merged,self.total_loss,self.train_op],feed_dict)
-            loss_array[i] = loss
-            
-            if i % 50 == 0:
-                print('loss:',loss)
+            # Check val stats
+            feed_dict_val = self.gen_variable_horizon_data_ordered(x_val, y_val, i+1, num_samples, horizon, test_horizon)
+            print('feed_dict_val ux shape', feed_dict_val[self.update_x].shape)
+            print('feed_dict_val uy shape', feed_dict_val[self.update_y].shape)
+            print('feed_dict_val x shape', feed_dict_val[self.x].shape)
+            print('feed_dict_val y shape', feed_dict_val[self.y].shape)
+            print('feed_dict_val num_updates shape', feed_dict_val[self.num_updates].shape)
 
-            if i % eval_frequency == 0:
-                # Check val loss
-                feed_dict_val = self.gen_variable_horizon_data(x_val, y_val, num_samples, horizon, test_horizon)
-                val_summary, val_loss, _ = sess.run([self.merged,self.total_loss,self.train_op],feed_dict_val)
-                val_loss_array[i//eval_frequency] = val_loss
-                print('val loss:', val_loss)
-                # if val_loss > np.mean(loss_array[i-10:i]):
-                #     print('HELLO loss', np.mean(loss_array[i-10:i]))
-                #     print('HELLO val_loss', val_loss)
-                #     break
+            # aaa, bbb, ccc = self.pred_f(feed_dict_val[self.update_x][0,:,:], feed_dict_val[self.update_y][0,:,:], feed_dict_val[self.num_updates][0], feed_dict_val[self.x][0,:,:])
+            # print('aaa', aaa)
+
+            print('hello hello')
+
+            val_summary, val_loss = sess.run([self.merged,self.total_loss],feed_dict_val)
+            self.val_writer.add_summary(val_summary, self.updates_so_far)
+            val_loss_array[i] = val_loss
+
+            # Check train stats
+            feed_dict = self.gen_variable_horizon_data_ordered(x, y, i+1, num_samples, horizon, test_horizon)
+            summary,loss, _ = sess.run([self.merged,self.total_loss,self.train_op],feed_dict)
+            self.train_writer.add_summary(summary, self.updates_so_far)
+            loss_array[i] = loss
+
+            if i % 50 == 0:
+                print('loss:', loss)
+                print('val_loss: ', val_loss)
 
             if i % 1000 == 0:
                 # Append the index number to the checkpoint name:
                 saver.save(sess, 'checkpoints/'+self.model_name, global_step=i)
             
-            self.train_writer.add_summary(summary, self.updates_so_far)
             self.updates_so_far += 1
 
         saver.save(sess, 'checkpoints/'+self.model_name, global_step=i)
+
         if plot_loss:
             # plot loss_array
-            plt.plot(np.arange(num_train_updates), loss_array, np.arange(0, num_train_updates, eval_frequency), val_loss_array)
+            plt.plot(np.arange(num_train_updates), loss_array, np.arange(num_train_updates), val_loss_array)
             plt.ylabel('Loss')
             plt.show()
 
@@ -246,12 +268,6 @@ class ALPaCA:
 
         y = y[:,horizon:,:]
         x = x[:,horizon:,:]
-        
-        # print('num_updates', num_updates)
-        # print('ux shape', ux.shape)
-        # print('uy shape', uy.shape)
-        # print('x shape', x.shape)
-        # print('y shape', y.shape)
 
         feed_dict = {
                 self.update_y: uy,
@@ -263,6 +279,73 @@ class ALPaCA:
         
         return feed_dict
 
+    def gen_variable_horizon_data_ordered(self,x,y,time_step,num_samples,horizon,test_horizon):
+        num_updates = np.random.randint(horizon+1, size=num_samples)
+        print('num_updates', num_updates)
+        
+        M,N = x.shape[0:2]
+        M_ind = np.random.choice(M, num_samples)
+        x = x[M_ind,:,:]
+        y = y[M_ind,:,:]
+        
+        # splitting into update and train sets along number of samples; first index is task/param
+        uy = y[:,:time_step+1,:]
+        ux = x[:,:time_step+1,:]
+
+        y = y[:,time_step:time_step+1,:]
+        x = x[:,time_step:time_step+1,:]
+
+        # y = np.expand_dims(y[:,time_step,:], axis=1)
+        # x = np.expand_dims(x[:,time_step,:], axis=1)
+
+        print('time_step', time_step)
+        print('y', y.shape)
+        print('x', x.shape)
+        print('ux dimensions here', ux.shape)
+
+        feed_dict = {
+                self.update_y: np.float32(uy),
+                self.update_x: np.float32(ux),
+                self.y: np.float32(y),
+                self.x: np.float32(x),
+                self.num_updates: num_updates,
+                }
+        
+        return feed_dict
+
+    # def gen_variable_horizon_data_time(self,x,y,num_samples,horizon,test_horizon):
+    #     num_updates = np.random.randint(horizon+1, size=num_samples)
+
+    #     print('hola', [item.shape for item in y])
+    #     M = len(x)
+    #     M_ind = np.random.choice(M, num_samples)
+    #     x = [x[i] for i in M_ind]
+    #     y = [y[i] for i in M_ind]
+
+    #     ux = [arr[:horizon,:] for arr in x]
+    #     uy = [arr[:horizon,:] for arr in y]
+    #     x = [arr[horizon:horizon+test_horizon,:] for arr in x]
+    #     y = [arr[horizon:horizon+test_horizon,:] for arr in y]
+    #     print('hey hey', [item.shape for item in y])
+        
+    #     # feed_dict = {
+    #     #         self.update_y: uy,
+    #     #         self.update_x: ux,
+    #     #         self.y: np.expand_dims(y, axis=0),
+    #     #         self.x: np.expand_dims(x, axis=0),
+    #     #         self.num_updates: num_updates
+    #     # }
+
+    #     feed_dict = {
+    #             self.update_y: np.stack(uy),
+    #             self.update_x: np.stack(ux),
+    #             self.y: np.stack(y),
+    #             self.x: np.stack(x),
+    #             self.num_updates: num_updates
+    #     }
+
+    #     return feed_dict
+
     def basis(self,x,name='basis'):
         layer_sizes = self.config['nn_layers']
         activations = {
@@ -273,12 +356,36 @@ class ALPaCA:
         activation = activations[ self.config['activation'] ]
 
         inp = x
+        print('x basis', x)
         with tf.variable_scope(name,reuse=tf.AUTO_REUSE):
             # inp = tf.stack([x],axis=1)
             for units in layer_sizes:
                 inp = tf.layers.dense(inputs=inp, units=units,activation=activation)
             
         return inp
+
+    def basis_lstm(self, x, name='basis_lstm'):
+        print('made it to basis_lstm')
+        layer_sizes = self.config['nn_layers']
+        activations = {
+            'relu': tf.nn.relu,
+            'tanh': tf.nn.tanh,
+            'sigmoid': tf.nn.sigmoid
+        }
+        activation = activations[ self.config['activation'] ]
+
+        print('updates_so_far', self.updates_so_far)
+        inp = tf.unstack(x, num=self.updates_so_far+1)
+        inp = [tf.expand_dims(x, axis=0) for x in inp]
+        print('inp', inp)
+        n_hidden = 256
+
+        with tf.variable_scope(name,reuse=tf.AUTO_REUSE):
+            lstm_layer = rnn.BasicLSTMCell(n_hidden)
+            outputs, _ = rnn.static_rnn(lstm_layer, inp, dtype=tf.float32)
+
+        return outputs[0]
+
     
 def batch_matmul(mat, batch_v, name='batch_matmul'):
     with tf.name_scope(name):

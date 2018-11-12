@@ -241,7 +241,7 @@ class TrajectoriesDataset():
         if self.action_label == 'train_set':
             self.all_filepaths = [a for (a, b, c) in os.walk(self.root_dir) if (len(b) == 0) and (os.stat(os.path.join(a,c[0])).st_size > 6000)]
         else:
-            self.all_filepaths = [a for (a, b, c) in os.walk(self.root_dir) if (len(b) == 0) and (a.split('/')[-2] == self.action_label) and (os.stat(os.path.join(a,c[0])).st_size > 6000)]
+            self.all_filepaths = [a for (a, b, c) in os.walk(self.root_dir) if (len(b) == 0) and (a.split('/')[-2] == self.action_label) and (os.stat(os.path.join(a,c[0])).st_size > 15000)]
         
     def __len__(self):
         return len(self.all_filepaths)
@@ -253,6 +253,7 @@ class TrajectoriesDataset():
         with open(filepath) as file:
             file_contents = file.readlines()
             traj_length = len(file_contents)
+            print('TRAJ_LENGTH', traj_length)
 
             assert (traj_length >= self.num_input_points + 1), "Trajectory is too short!"
 
@@ -275,11 +276,29 @@ class TrajectoriesDataset():
                 temp_init_array = np.asarray(file_contents[i].split()).astype(np.float)
                 init_array[current_row, i%self.row_length, :] = temp_init_array[1:]
 
-            # print('target_array size', target_array.shape)
-            # print('traj_array size', traj_array.shape)
-            # print('init_array size', init_array.shape)
-
         return target_array, traj_array, init_array
+
+    def get_item_time(self, filepath_idx):
+        filepath = os.path.join(self.all_filepaths[filepath_idx], "skeleton.txt")
+
+        with open(filepath) as file:
+            file_contents = file.readlines()
+            traj_length = len(file_contents)
+            print('TRAJ_LENGTH', traj_length)
+
+            # x_array = np.arange(traj_length) / traj_length
+            # y_array = np.zeros((traj_length, self.input_dim*self.num_hand_points))
+            x_array = np.expand_dims(np.arange(traj_length-1) / (traj_length-2), axis=1)
+            y_array = np.zeros((traj_length-1, self.input_dim*self.num_hand_points))
+
+            for i in range(1, traj_length):
+                prev_file_line = file_contents[i-1].split()
+                file_line = file_contents[i].split()
+                for j in range(len(file_line) - 1):
+                    y_array[i-1, j] = float(file_line[j+1]) - float(prev_file_line[j+1])
+
+        return y_array, x_array
+
 
     def sample_trajectories(self, num_samples):
         sample_ids = np.random.choice(self.__len__(), num_samples, replace=False)
@@ -295,3 +314,23 @@ class TrajectoriesDataset():
             init_matrix = np.vstack((init_matrix, init_array))
 
         return target_matrix, traj_matrix, init_matrix
+
+    def sample_trajectories_time(self, num_samples, points_per_traj):
+        sample_ids = np.random.choice(self.__len__(), num_samples)
+        # x_matrix = np.zeros((num_samples, points_per_traj))
+        # y_matrix = np.zeros((num_samples, points_per_traj, self.input_dim*self.num_hand_points))
+
+        x_list = []
+        y_list = []
+
+        for i in range(num_samples):
+            idx = sample_ids[i]
+            y_array, x_array = self.get_item_time(idx)
+            # sampled_traj_points = np.random.choice(len(x_array), points_per_traj)
+            # x_matrix[i,:] = x_array[sampled_traj_points]
+            # y_matrix[i,:,:] = y_array[sampled_traj_points,:]
+            x_list.append(x_array)
+            y_list.append(y_array)
+
+        return y_list, x_list
+
