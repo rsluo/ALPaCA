@@ -1,6 +1,6 @@
-data_horizon: 10
+data_horizon: 20
 test_horizon: 10
-row_length: 20
+row_length: 30
 num_class_samples: 50    # Number of trajectories that are sampled
 x_dim_time: 1     # For the time formulation.
 y_dim_time: 63    # For the time formulation.
@@ -11,12 +11,13 @@ y_dim: 1
 sigma_eps: 0.005
 
 lr: 0.0001
-nn_layers: [256,256,256,256]
+nn_layers: [256]
 activation: 'tanh'
+basis: 'lstm'
 
 num_input_points: 10
 num_hand_points: 21
 input_dim: 3
 shuffle: False
-action: 'open_wallet'
+action: 'train-set'
 formulation: 'space'
