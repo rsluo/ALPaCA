@@ -3,6 +3,7 @@ import numpy as np
 import time
 from copy import deepcopy
 from tensorflow.python.ops.parallel_for import gradients
+from tensorflow.contrib import rnn
 
 
 class ALPaCA:
@@ -10,15 +11,6 @@ class ALPaCA:
         self.config = deepcopy(config)
         self.lr = config['lr']
         self.formulation = config['formulation']
-        # if self.formulation == 'time':
-        #     self.x_dim = config['x_dim_time']
-        #     self.y_dim = config['y_dim_time']
-        # elif self.formulation == 'space':
-        #     self.x_dim = config['x_dim_space']
-        #     self.y_dim = config['y_dim_space']
-        # else:
-        #     self.x_dim = config['x_dim']
-        #     self.y_dim = config['y_dim']
         self.x_dim = config['x_dim']
         self.y_dim = config['y_dim']
         self.phi_dim = config['nn_layers'][-1]  # Last layer 
@@ -33,8 +25,12 @@ class ALPaCA:
         self.f_nom = f_nom 
 
         arch_string = [str(config_layer) for config_layer in self.config['nn_layers']]
-        arch_string = '_'.join(arch_string)
-        self.model_name = self.formulation+'_'+str(time.time())+'_'+'action='+self.config['action']+'_nn_layers='+arch_string+'_lr='+str(self.lr)+'_sigma_eps='+str(self.sigma_scalar)+'_num_class_samples='+str(self.config['num_class_samples'])
+        arch_string = '-'.join(arch_string)
+        self.model_name = self.formulation+'_'+str(time.time())+'_action='+self.config['action']+'_basis='+self.config['basis']+    \
+                        '_nn-layers='+arch_string+'_activation='+self.config['activation']+'_lr='+str(self.lr)+                     \
+                        '_sigma-eps='+str(self.sigma_eps)+'_batch-size='+str(self.config['meta_batch_size'])+                 \
+                        '_num-input-points='+str(self.config['num_input_points'])+                                                  \
+                        '_data-horizon='+str(self.config['data_horizon'])+'_test-horizon='+str(self.config['test_horizon'])+'_row-length='+str(self.config['row_length'])
 
     def construct_model(self):
         with self.graph.as_default():
@@ -74,16 +70,28 @@ class ALPaCA:
             # Map input to feature space
             with tf.variable_scope('phi',reuse=None):
                 # self.phi is (M, N_test, phi_dim)
-                self.phi = tf.map_fn( lambda x: self.basis(x),
+                if self.basis == 'lstm':
+                    self.phi = tf.map_fn( lambda x: self.basis_lstm(x),
                                  elems=self.x,
                                  dtype=tf.float32)
+                else:
+                    self.phi = tf.map_fn( lambda x: self.basis(x),
+                                 elems=self.x,
+                                 dtype=tf.float32)
+
 
             # Map context input to feature space
             with tf.variable_scope('phi', reuse=True):
                 # self.context_phi is (M, N_context, phi_dim)
-                self.context_phi = tf.map_fn( lambda x: self.basis(x),
+                if self.basis == 'lstm':
+                    self.context_phi = tf.map_fn( lambda x: self.basis_lstm(x),
                                               elems=self.context_x,
                                               dtype=tf.float32)
+                else:
+                    self.context_phi = tf.map_fn( lambda x: self.basis(x),
+                                              elems=self.context_x,
+                                              dtype=tf.float32)
+
                 
             # Evaluate f_nom if given, else use 0
             self.f_nom_cx = tf.zeros_like(self.context_y)
@@ -115,7 +123,8 @@ class ALPaCA:
             global_step = tf.Variable(0, trainable=False, name='global_step')
             self.train_op = self.optimizer.minimize(self.total_loss,global_step=global_step)
 
-            self.train_writer = tf.summary.FileWriter('summaries/'+str(time.time()), self.sess.graph, flush_secs=10)
+            self.train_writer = tf.summary.FileWriter('summaries/train_'+self.model_name, self.sess.graph, flush_secs=10)
+            self.val_writer = tf.summary.FileWriter('summaries/val_'+self.model_name, self.sess.graph, flush_secs=10)
             self.merged = tf.summary.merge_all()
 
             self.saver = tf.train.Saver()
@@ -141,6 +150,26 @@ class ALPaCA:
                 inp = tf.layers.dense(inputs=inp, units=units,activation=activation)
 
         return inp
+
+
+    def basis_lstm(self, x, name='basis_lstm'):
+        layer_sizes = self.config['nn_layers']
+        activations = {
+            'relu': tf.nn.relu,
+            'tanh': tf.nn.tanh,
+            'sigmoid': tf.nn.sigmoid
+        }
+        activation = activations[ self.config['activation'] ]
+
+        x = tf.expand_dims(x, axis=0)  
+        with tf.variable_scope(name,reuse=tf.AUTO_REUSE):
+            cells = [rnn.LSTMCell(num_units=layer, activation=activation) for layer in layer_sizes]
+            stacked_cell = rnn.MultiRNNCell(cells)
+            outputs, state = tf.nn.dynamic_rnn(stacked_cell, x, dtype=tf.float32)
+            # outputs, state = tf.nn.dynamic_rnn(cell, x, sequence_length=tf.expand_dims(seq_len, axis=0), dtype=tf.float32)
+
+        return outputs[0,:,:]
+
 
     def batch_blr(self,X,Y,num):
         X = X[:num,:]
@@ -182,33 +211,56 @@ class ALPaCA:
 
     
     # ---- Train and Test functions ------ #
-    def train(self, dataset, num_train_updates):
+    def train(self, dataset, dataset_val, num_train_updates):
         batch_size = self.config['meta_batch_size']
         horizon = self.config['data_horizon']
         test_horizon = self.config['test_horizon']
-        loss_array = np.zeros(num_train_updates)
-        val_loss_array = np.zeros(num_train_updates)
-        saver = tf.train.Saver()
 
-        #minimize loss
+        # minimize loss
         for i in range(num_train_updates):
-            x,y = dataset.sample(n_funcs=batch_size, n_samples=horizon+test_horizon)
-
+            x, y = dataset.sample(n_funcs=batch_size, n_samples=horizon+test_horizon)
             feed_dict = {
                     self.context_y: y[:,:horizon,:],
                     self.context_x: x[:,:horizon,:],
                     self.y: y[:,horizon:,:],
                     self.x: x[:,horizon:,:],
                     self.num_context: np.random.randint(horizon+1,size=batch_size)
-                    }
+            }
 
-            summary,loss, _ = self.sess.run([self.merged,self.total_loss,self.train_op],feed_dict)
+            summary, loss, _ = self.sess.run([self.merged,self.total_loss,self.train_op],feed_dict)
+
+            x_val, y_val = dataset_val.sample(n_funcs=batch_size, n_samples=horizon+test_horizon)
+            feed_dict_val = {
+                            self.context_y: y_val[:,:horizon,:],
+                            self.context_x: x_val[:,:horizon,:],
+                            self.y: y_val[:,horizon:,:],
+                            self.x: x_val[:,horizon:,:],
+                            self.num_context: np.random.randint(horizon+1,size=batch_size)
+            }
+
+            val_summary, val_loss = self.sess.run([self.merged,self.total_loss],feed_dict_val)
+
+            # Check val stats
+            # feed_dict_val = self.gen_variable_horizon_data_ordered(x_val, y_val, num_samples, horizon, test_horizon)
+            # print('feed_dict_val ux shape', feed_dict_val[self.update_x].shape)
+            # print('feed_dict_val uy shape', feed_dict_val[self.update_y].shape)
+            # print('feed_dict_val x shape', feed_dict_val[self.x].shape)
+            # print('feed_dict_val y shape', feed_dict_val[self.y].shape)
+            # print('feed_dict_val num_updates shape', feed_dict_val[self.num_updates].shape)
+
 
             if i % 50 == 0:
                 print('loss:',loss)
+                print('val_loss: ', val_loss)
+
+            if i % 1000 == 0:
+                self.save('checkpoints/'+self.model_name, global_step=i)
 
             self.train_writer.add_summary(summary, self.updates_so_far)
+            self.val_writer.add_summary(val_summary, self.updates_so_far)
             self.updates_so_far += 1
+
+        self.save('checkpoints/'+self.model_name, global_step=i)
 
     # x_c, y_c, x are all [N, n]
     # returns mu_pred, Sig_pred
@@ -221,71 +273,54 @@ class ALPaCA:
         mu_pred, Sig_pred = self.sess.run([self.mu_pred, self.Sig_pred], feed_dict)
         return mu_pred, Sig_pred
 
-    def gen_variable_horizon_data_ordered(self,x,y,time_step,num_samples,horizon,test_horizon):
-        num_updates = np.random.randint(horizon+1, size=num_samples)
-        print('num_updates', num_updates)
-        
-        M,N = x.shape[0:2]
-        M_ind = np.random.choice(M, num_samples)
-        x = x[M_ind,:,:]
-        y = y[M_ind,:,:]
-        
-        # splitting into update and train sets along number of samples; first index is task/param
-        uy = y[:,:time_step+1,:]
-        ux = x[:,:time_step+1,:]
+    # def generate_train_dict(self, x_val, y_val, horizon, batch_size):
+    #     context_x = np.zeros([x_val.shape[0], horizon, x_val.shape[2]])
+    #     context_y = np.zeros([y_val.shape[0], horizon, y_val.shape[2]])
+    #     num_context_points = np.random.randint(horizon+1, size=batch_size)
 
-        y = y[:,time_step:time_step+1,:]
-        x = x[:,time_step:time_step+1,:]
-
-        # y = np.expand_dims(y[:,time_step,:], axis=1)
-        # x = np.expand_dims(x[:,time_step,:], axis=1)
-
-        print('time_step', time_step)
-        print('y', y.shape)
-        print('x', x.shape)
-        print('ux dimensions here', ux.shape)
-
-        feed_dict = {
-                self.update_y: np.float32(uy),
-                self.update_x: np.float32(ux),
-                self.y: np.float32(y),
-                self.x: np.float32(x),
-                self.num_updates: num_updates,
-                }
-        
-        return feed_dict
-
-    # def gen_variable_horizon_data_time(self,x,y,num_samples,horizon,test_horizon):
-    #     num_updates = np.random.randint(horizon+1, size=num_samples)
-
-    #     print('hola', [item.shape for item in y])
-    #     M = len(x)
-    #     M_ind = np.random.choice(M, num_samples)
-    #     x = [x[i] for i in M_ind]
-    #     y = [y[i] for i in M_ind]
-
-    #     ux = [arr[:horizon,:] for arr in x]
-    #     uy = [arr[:horizon,:] for arr in y]
-    #     x = [arr[horizon:horizon+test_horizon,:] for arr in x]
-    #     y = [arr[horizon:horizon+test_horizon,:] for arr in y]
-    #     print('hey hey', [item.shape for item in y])
-        
-    #     # feed_dict = {
-    #     #         self.update_y: uy,
-    #     #         self.update_x: ux,
-    #     #         self.y: np.expand_dims(y, axis=0),
-    #     #         self.x: np.expand_dims(x, axis=0),
-    #     #         self.num_updates: num_updates
-    #     # }
+    #     context_x[:,:num_context_points,:] = x_val[:,:num_context_points,:]
+    #     context_y[:,:num_context_points,:] = y_val[:,:num_context_points,:]
+    #     x = x_val[:,num_context_points:num_context_points+1,:]
+    #     y = y_val[:,num_context_points:num_context_points+1,:]
 
     #     feed_dict = {
-    #             self.update_y: np.stack(uy),
-    #             self.update_x: np.stack(ux),
-    #             self.y: np.stack(y),
-    #             self.x: np.stack(x),
-    #             self.num_updates: num_updates
-    #     }
+    #             self.context_y: context_y,
+    #             self.context_x: context_x,
+    #             self.y: y,
+    #             self.x: x,
+    #             self.num_context: num_context_points,
+    #             }
 
+    #     return feed_dict
+
+    # def gen_variable_horizon_data_ordered(self,x,y,num_samples,horizon,test_horizon):
+    #     num_updates = np.random.randint(horizon+1, size=num_samples)
+        
+    #     M,N = x.shape[0:2]
+    #     M_ind = np.random.choice(M, num_samples)
+    #     x = x[M_ind,:,:]
+    #     y = y[M_ind,:,:]
+
+    #     uy = np.zeros([num_samples, horizon, self.y_dim])
+    #     ux = np.zeros([num_samples, horizon, self.x_dim])
+    #     temp_y = np.zeros([num_samples, 1, self.y_dim])
+    #     temp_x = np.zeros([num_samples, 1, self.x_dim])
+
+    #     for i in range(num_samples):
+    #         current_num_update = num_updates[i]
+    #         uy[i,:current_num_update,:] = y[i,:current_num_update,:]
+    #         ux[i,:current_num_update,:] = x[i,:current_num_update,:]
+    #         temp_y[i,:,:] = y[i,current_num_update:current_num_update+1,:]
+    #         temp_x[i,:,:] = x[i,current_num_update:current_num_update+1,:]
+
+    #     feed_dict = {
+    #             self.update_y: np.float32(uy),
+    #             self.update_x: np.float32(ux),
+    #             self.y: np.float32(temp_y),
+    #             self.x: np.float32(temp_x),
+    #             self.num_updates: num_updates,
+    #             }
+        
     #     return feed_dict
 
     # convenience function to use just the encoder on numpy input
@@ -295,32 +330,9 @@ class ALPaCA:
         }
         return self.sess.run(self.phi, feed_dict)
 
-    def basis_lstm(self, x, name='basis_lstm'):
-        print('made it to basis_lstm')
-        layer_sizes = self.config['nn_layers']
-        activations = {
-            'relu': tf.nn.relu,
-            'tanh': tf.nn.tanh,
-            'sigmoid': tf.nn.sigmoid
-        }
-        activation = activations[ self.config['activation'] ]
-
-        print('updates_so_far', self.updates_so_far)
-        inp = tf.unstack(x, num=self.updates_so_far+1)
-        inp = [tf.expand_dims(x, axis=0) for x in inp]
-        print('inp', inp)
-        n_hidden = 256
-
-        with tf.variable_scope(name,reuse=tf.AUTO_REUSE):
-            lstm_layer = rnn.BasicLSTMCell(n_hidden)
-            outputs, _ = rnn.static_rnn(lstm_layer, inp, dtype=tf.float32)
-
-        return outputs[0]
-
-
     # ---- Save and Restore ------
-    def save(self, model_path):
-        save_path = self.saver.save(self.sess, model_path)
+    def save(self, model_path, global_step=None):
+        save_path = self.saver.save(self.sess, model_path, global_step=global_step)
         print('Saved to:', save_path)
 
     def restore(self, model_path):

@@ -202,7 +202,7 @@ def plot_two_hands(hand_points1, hand_points2, save_fig = False, save_name = Non
     x_coords1 = hand_points1[::3]
     y_coords1 = hand_points1[1::3]
     z_coords1 = hand_points1[2::3]
-    
+
     mean_x_coords = np.mean(x_coords1)
     mean_y_coords = np.mean(y_coords1)
     mean_z_coords = np.mean(z_coords1)

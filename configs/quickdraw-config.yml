@@ -1,0 +1,22 @@
+data_horizon: 20
+test_horizon: 10
+row_length: 30
+num_class_samples: 50    # Number of trajectories that are sampled
+# x_dim_time: 1     # For the time formulation.
+# y_dim_time: 63    # For the time formulation.
+# x_dim_space: 567  # For the space formulation. In this case x_dim = (num_input_points - 1) * num_hand_points * input_dim
+# y_dim_space: 63   # For the space formulation. In this case y_dim = 1 * num_hand_points * input_dim
+x_dim: 20
+y_dim: 2
+sigma_eps: 0.005
+
+lr: 0.0001
+nn_layers: [256]
+activation: 'tanh'
+basis: 'lstm'
+
+num_input_points: 10
+input_dim: 2
+shuffle: False
+action: 'train-set'
+formulation: 'quickdraw'

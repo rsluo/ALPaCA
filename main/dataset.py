@@ -1,6 +1,7 @@
 import numpy as np
 import gym
 import tqdm
+import os
 
 class Dataset:
     def __init__(self):
@@ -10,6 +11,93 @@ class Dataset:
     # returns (x,y) where each has size [n_func, n_samples, x/y_dim]
     def sample(self, n_funcs, n_samples):
         raise NotImplementedError
+
+class HandTrajectoryDataset(Dataset):
+    def __init__(self, root_dir, action_label, basis, num_input_points, num_hand_points=21, input_dim=3, row_length=30, shuffle=False):
+        self.root_dir = root_dir
+        self.action_label = action_label
+        self.basis = basis
+        self.num_input_points = num_input_points
+        self.num_hand_points = num_hand_points
+        self.input_dim = input_dim
+        self.row_length = row_length
+        self.shuffle = shuffle
+        # for a, b, c in os.walk(self.root_dir):
+        #     print('a', a)
+        #     print('b', b)
+        #     print('c', c)
+        # Get all filepaths, excluding empty or small files
+        if self.action_label == 'train-set':
+            self.all_filepaths = [a for (a, b, c) in os.walk(self.root_dir) if (len(b) == 0) and (os.stat(os.path.join(a,c[0])).st_size > 6000)]
+        else:
+            self.all_filepaths = [a for (a, b, c) in os.walk(self.root_dir) if (len(b) == 0) and (a.split('/')[-2] == self.action_label) and (os.stat(os.path.join(a,c[0])).st_size > 15000)]
+
+    def get_item(self, filepath_idx):
+        filepath = os.path.join(self.all_filepaths[filepath_idx], "skeleton.txt")
+
+        with open(filepath) as file:
+            file_contents = file.readlines()
+            traj_length = len(file_contents)
+
+            assert (traj_length >= self.num_input_points + 1), "Trajectory is too short!"
+
+            num_rows = (traj_length - self.num_input_points - 1) // self.row_length
+            x_array = np.zeros((num_rows, self.row_length, (self.num_input_points-1)*self.input_dim*self.num_hand_points))
+            y_array = np.zeros((num_rows, self.row_length, self.input_dim*self.num_hand_points))
+            init_array = np.zeros((num_rows, self.row_length, self.input_dim*self.num_hand_points))
+            
+            for i in range(self.row_length * num_rows):
+                current_row = i // self.row_length
+                for j in range(1, self.num_input_points):
+                    prev_file_line = file_contents[i + j - 1].split()
+                    file_line = file_contents[i + j].split()
+                    for k in range(len(file_line) - 1):
+                        x_array[current_row, (i%self.row_length), (j-1)*self.input_dim*self.num_hand_points + k] = float(file_line[k+1]) - float(prev_file_line[k+1])
+
+                temp_y = np.asarray(file_contents[i+j+1].split()).astype(np.float)
+                temp_y_prev = np.asarray(file_contents[i+j].split()).astype(np.float)
+                y_array[current_row, (i%self.row_length), :] = temp_y[1:] - temp_y_prev[1:]
+                temp_init = np.asarray(file_contents[i].split()).astype(np.float)
+                init_array[current_row, i%self.row_length, :] = temp_init[1:]
+
+        return x_array, y_array, init_array
+
+    def sample(self, n_funcs, n_samples):
+        sample_ids = np.random.choice(len(self.all_filepaths), n_funcs)
+
+        # Not really using n_samples in this case, just getting all points in the trajectory 
+        if self.basis == 'lstm':        
+            x_matrix = np.zeros((0, self.row_length, (self.num_input_points-1)*self.input_dim*self.num_hand_points))
+            y_matrix = np.zeros((0, self.row_length, self.input_dim*self.num_hand_points))
+            init_matrix = np.zeros((0, self.row_length, self.input_dim*self.num_hand_points))     
+
+            for i in range(n_funcs):
+                idx = sample_ids[i]
+                x_array, y_array, init_array = self.get_item(idx)
+                y_matrix = np.vstack((y_matrix, y_array))
+                x_matrix = np.vstack((x_matrix, x_array))
+                init_matrix = np.vstack((init_matrix, init_array))
+
+            return x_matrix, y_matrix
+            # return x_matrix, y_matrix, init_matrix
+
+        # If the basis is an mlp
+        else:
+            x_matrix = np.zeros((0, n_samples, (self.num_input_points-1)*self.input_dim*self.num_hand_points))
+            y_matrix = np.zeros((0, n_samples, self.input_dim*self.num_hand_points))
+            init_matrix = np.zeros((0, n_samples, self.input_dim*self.num_hand_points))  
+
+            for i in range(n_funcs):
+                idx = sample_ids[i]
+                x_array, y_array, init_array = self.get_item(idx)
+                samples_to_keep = np.random.choice(self.row_length, n_samples)
+                y_matrix = np.vstack((y_matrix, y_array[:,samples_to_keep,:]))
+                x_matrix = np.vstack((x_matrix, x_array[:,samples_to_keep,:]))
+                init_matrix = np.vstack((init_matrix, init_array[:,samples_to_keep,:]))
+
+            return x_matrix, y_matrix
+            # return x_matrix, y_matrix, init_matrix
+
 
 class PresampledDataset(Dataset):
     def __init__(self, X, Y):

@@ -3,7 +3,7 @@
 ._*.py
 ._*.yml
 .ipynb_checkpoints/
-summaries/
-checkpoints/
+summaries*/
+checkpoints*/
 figures/
 src/
