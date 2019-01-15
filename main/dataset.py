@@ -62,24 +62,26 @@ class HandTrajectoryDataset(Dataset):
 
         return x_array, y_array, init_array
 
-    def sample(self, n_funcs, n_samples):
+    def sample(self, n_funcs, n_samples, return_init=False):
         sample_ids = np.random.choice(len(self.all_filepaths), n_funcs)
 
-        # Not really using n_samples in this case, just getting all points in the trajectory 
+        # If the basis is an lstm. Not really using n_samples in this case, just getting all points in the trajectory 
         if self.basis == 'lstm':        
             x_matrix = np.zeros((0, self.row_length, (self.num_input_points-1)*self.input_dim*self.num_hand_points))
             y_matrix = np.zeros((0, self.row_length, self.input_dim*self.num_hand_points))
             init_matrix = np.zeros((0, self.row_length, self.input_dim*self.num_hand_points))     
 
+            print('n_funcs:', n_funcs)
             for i in range(n_funcs):
+                print('i:', i)
                 idx = sample_ids[i]
                 x_array, y_array, init_array = self.get_item(idx)
+                print('x_array shape', x_array.shape)
                 y_matrix = np.vstack((y_matrix, y_array))
                 x_matrix = np.vstack((x_matrix, x_array))
                 init_matrix = np.vstack((init_matrix, init_array))
-
-            return x_matrix, y_matrix
-            # return x_matrix, y_matrix, init_matrix
+                print('x_matrix shape', x_matrix.shape)
+            print()
 
         # If the basis is an mlp
         else:
@@ -95,8 +97,10 @@ class HandTrajectoryDataset(Dataset):
                 x_matrix = np.vstack((x_matrix, x_array[:,samples_to_keep,:]))
                 init_matrix = np.vstack((init_matrix, init_array[:,samples_to_keep,:]))
 
-            return x_matrix, y_matrix
-            # return x_matrix, y_matrix, init_matrix
+        if return_init:
+            return x_matrix, y_matrix, init_matrix
+
+        return x_matrix, y_matrix
 
 
 class PresampledDataset(Dataset):

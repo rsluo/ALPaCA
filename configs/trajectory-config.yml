@@ -7,7 +7,7 @@ y_dim: 63       # For the space formulation. In this case y_dim = 1 * num_hand_p
 sigma_eps: 0.005
 
 lr: 0.0001
-nn_layers: [256]
+nn_layers: [256, 256, 256]
 activation: 'tanh'
 basis: 'lstm'
 
